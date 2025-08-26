@@ -1,0 +1,161 @@
+---
+# Zabbix 7.0 LTS Web Interface Deployment
+# Optimized for corporate environments
+
+- name: "🌐 Deploy Zabbix Web Interface"
+  shell: |
+    cat << 'EOF' | {{ kubectl_path }} apply -f -
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: zabbix-web
+      namespace: zabbix-monitoring
+      labels:
+        app: zabbix-web
+        component: web-interface
+    spec:
+      replicas: 2
+      selector:
+        matchLabels:
+          app: zabbix-web
+      template:
+        metadata:
+          labels:
+            app: zabbix-web
+            component: web-interface
+        spec:
+          containers:
+          - name: zabbix-web
+            image: zabbix/zabbix-web-nginx-pgsql:7.0-ubuntu-latest
+            ports:
+            - containerPort: 8080
+              name: web
+            - containerPort: 8443
+              name: web-ssl
+            env:
+            # Database Configuration
+            - name: DB_SERVER_HOST
+              value: "postgresql-service"
+            - name: DB_SERVER_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-password
+            # Zabbix Server Connection
+            - name: ZBX_SERVER_HOST
+              value: "zabbix-server-service"
+            - name: ZBX_SERVER_PORT
+              value: "10051"
+            - name: ZBX_SERVER_NAME
+              value: "Zabbix 7.0 LTS Corporate Monitoring"
+            # PHP Configuration
+            - name: PHP_TZ
+              value: "America/Sao_Paulo"
+            - name: PHP_MEMORY_LIMIT
+              value: "512M"
+            - name: PHP_MAX_EXECUTION_TIME
+              value: "600"
+            - name: PHP_POST_MAX_SIZE
+              value: "64M"
+            - name: PHP_UPLOAD_MAX_FILESIZE
+              value: "16M"
+            - name: PHP_MAX_INPUT_TIME
+              value: "600"
+            # Security and Branding
+            - name: ZBX_GUI_WARNING_MSG
+              value: "Zabbix Corporate Monitoring - Ambiente Produção"
+            # HTTPS/SSL Configuration
+            - name: ZBX_WEBSERVER_HTTPS
+              value: "ssl"
+            - name: ZBX_WEBSERVER_SSL_CERT_FILE
+              value: "/etc/ssl/nginx/ssl.crt"
+            - name: ZBX_WEBSERVER_SSL_KEY_FILE  
+              value: "/etc/ssl/nginx/ssl.key"
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"
+            readinessProbe:
+              httpGet:
+                path: /
+                port: 8080
+              initialDelaySeconds: 15
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: 3
+            livenessProbe:
+              httpGet:
+                path: /
+                port: 8080
+              initialDelaySeconds: 60
+              periodSeconds: 30
+              timeoutSeconds: 10
+              failureThreshold: 3
+          nodeSelector:
+            kubernetes.io/os: linux
+    ---
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: zabbix-web-service
+      namespace: zabbix-monitoring
+      labels:
+        app: zabbix-web
+    spec:
+      type: NodePort
+      ports:
+      - port: 8080
+        targetPort: 8080
+        protocol: TCP
+        name: web
+        nodePort: 30080
+      - port: 8443
+        targetPort: 8443
+        protocol: TCP
+        name: web-ssl
+        nodePort: 30443
+      selector:
+        app: zabbix-web
+    EOF
+  register: zabbix_web_deploy
+  changed_when: "'created' in zabbix_web_deploy.stdout or 'configured' in zabbix_web_deploy.stdout"
+
+- name: "⏳ Wait for Zabbix Web Interface to be ready"
+  shell: "{{ kubectl_path }} wait --for=condition=available deployment/zabbix-web -n zabbix-monitoring --timeout=300s"
+  register: web_ready
+  retries: 3
+  delay: 10
+  until: web_ready.rc == 0
+
+- name: "🔍 Verify web interface pods are running"
+  shell: "{{ kubectl_path }} get pods -n zabbix-monitoring -l app=zabbix-web -o jsonpath='{.items[*].status.phase}'"
+  register: web_pods_status
+  retries: 3
+  delay: 5
+  until: "'Running' in web_pods_status.stdout"
+
+- name: "📊 Zabbix Web Interface deployment status"
+  set_fact:
+    web_deployment_status: "{{ zabbix_web_deploy.stdout_lines }}"
+
+- name: "✅ Zabbix Web Interface deployment completed"
+  set_fact:
+    web_completion:
+      - "Web Interface: Deployed ✅"
+      - "High Availability: 2 replicas ✅"
+      - "NodePort: 30080 (HTTP), 30443 (HTTPS) ✅"

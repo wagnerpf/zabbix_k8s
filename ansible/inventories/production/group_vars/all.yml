@@ -1,0 +1,239 @@
+# Zabbix 7.0 LTS Corporate Configuration
+# Otimizado para ambientes empresariais com 300+ hosts
+
+# === GENERAL SETTINGS ===
+project_name: "zabbix-corporate-monitoring"
+deployment_environment: "production"
+cluster_name: "k8s-corporate"
+
+# === ZABBIX VERSION AND IMAGES ===
+zabbix:
+  version: "7.0"
+  tag: "7.0-ubuntu-latest"
+  server_image: "zabbix/zabbix-server-pgsql:7.0-ubuntu-latest"
+  web_image: "zabbix/zabbix-web-nginx-pgsql:7.0-ubuntu-latest"
+  proxy_image: "zabbix/zabbix-proxy-mysql:7.0-ubuntu-latest"
+  agent_image: "zabbix/zabbix-agent2:7.0-ubuntu-latest"
+  snmptraps_image: "zabbix/zabbix-snmptraps:7.0-ubuntu-latest"
+
+# === DATABASE CONFIGURATION ===
+database:
+  type: "postgresql"
+  version: "15-alpine"
+  image: "postgres:15-alpine"
+  name: "zabbix"
+  user: "zabbix"
+  password: "ZabbixCorpDB2025!"
+  root_password: "PostgresRoot2025!"
+  port: 5432
+  storage:
+    size: "20Gi"
+    class: "longhorn"
+
+# === NETWORK CONFIGURATION ===
+network:
+  namespace: "zabbix-monitoring"
+  service_type: "NodePort"
+  web:
+    http_port: 8080
+    https_port: 8443
+    nodeport_http: 30080
+    nodeport_https: 30443
+  server:
+    port: 10051
+  ingress:
+    enabled: false
+    host: "zabbix.empresa.local"
+    tls_enabled: true
+
+# === STORAGE CONFIGURATION ===
+storage:
+  class: "longhorn"
+  postgres:
+    size: "20Gi"
+    access_modes: ["ReadWriteOnce"]
+  zabbix_server:
+    size: "10Gi"
+    access_modes: ["ReadWriteOnce"]
+
+# === ZABBIX SERVER PERFORMANCE TUNING ===
+# Otimizado para ambientes corporativos (300+ hosts, múltiplos clusters K8s)
+zabbix_server:
+  performance:
+    # Cache Configuration (Increased for corporate workloads)
+    cache_size: "512M"                    # Default: 8M
+    history_cache_size: "1024M"           # Default: 16M  
+    history_index_cache_size: "512M"      # Default: 4M
+    trend_cache_size: "512M"              # Default: 4M
+    value_cache_size: "1024M"             # Default: 8M
+    
+    # Process Configuration (Scaled for high load)
+    start_pollers: "25"                   # Default: 5
+    start_pollers_unreachable: "5"        # Default: 1
+    start_trappers: "15"                  # Default: 5
+    start_pingers: "8"                    # Default: 1
+    start_discoverers: "5"                # Default: 1
+    start_http_pollers: "8"               # Default: 1
+    start_timers: "1"                     # Default: 1
+    start_escalators: "2"                 # Default: 1
+    start_alerters: "5"                   # Default: 3
+    start_db_syncers: "6"                 # Default: 4
+    
+    # Housekeeping (Aggressive cleanup for large datasets)
+    housekeeping_frequency: "1"           # Hours
+    max_housekeeper_delete: "10000"       # Records per execution
+    
+    # Network and Timeouts
+    timeout: "30"                         # Default: 3
+    trapper_timeout: "300"                # Default: 300
+    unreachable_period: "45"              # Default: 45
+    unavailable_delay: "60"               # Default: 60
+    unreachable_delay: "15"               # Default: 15
+    
+  # Corporate Environment Settings
+  config:
+    server_name: "Zabbix 7.0 LTS Corporate Monitoring"
+    debug_level: "1"
+    log_slow_queries: "3000"
+    enable_snmp_traps: true
+    enable_remote_commands: true
+    
+  # Security Settings
+  security:
+    allow_root: false
+    socket_dir: "/var/run/zabbix"
+    pid_file: "/var/run/zabbix/zabbix_server.pid"
+
+# === ZABBIX WEB INTERFACE ===
+zabbix_web:
+  replicas: 2
+  php:
+    timezone: "America/Sao_Paulo"
+    memory_limit: "512M"
+    max_execution_time: "600"
+    post_max_size: "64M"
+    upload_max_filesize: "16M"
+    max_input_time: "600"
+  
+  # Corporate Branding (New in 7.0)
+  branding:
+    custom_css: true
+    warning_message: "Zabbix Corporate Monitoring - Ambiente Produção"
+    session_name: "zbx_corporate_sessionid"
+    deny_gui_access: false
+    gui_access_ip_range: "[]"
+
+# === RESOURCE LIMITS ===
+resources:
+  zabbix_server:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  
+  zabbix_web:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  postgresql:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# === HEALTH CHECKS ===
+health_checks:
+  liveness_probe:
+    initial_delay: 60
+    period: 30
+    timeout: 10
+    failure_threshold: 3
+  
+  readiness_probe:
+    initial_delay: 15
+    period: 10
+    timeout: 5
+    failure_threshold: 3
+
+# === BACKUP AND MAINTENANCE ===
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 30
+  storage_class: "longhorn"
+  storage_size: "50Gi"
+
+# === MONITORING AND OBSERVABILITY ===
+monitoring:
+  prometheus:
+    enabled: true
+    scrape_interval: "30s"
+    metrics_path: "/metrics"
+  
+  alerting:
+    slack_enabled: false
+    email_enabled: true
+    webhook_enabled: false
+
+# === SECURITY CONFIGURATIONS ===
+security:
+  network_policies: true
+  pod_security_standards: "restricted"
+  run_as_non_root: true
+  read_only_root_filesystem: false
+  
+  tls:
+    enabled: false
+    cert_manager: false
+    cluster_issuer: "letsencrypt-prod"
+
+# === CORPORATE INTEGRATION ===
+corporate:
+  # LDAP/AD Integration (Future expansion)
+  ldap:
+    enabled: false
+    server: ""
+    port: 389
+    base_dn: ""
+  
+  # SAML Integration (7.0 feature)
+  saml:
+    enabled: false
+    idp_entityid: ""
+    sp_entityid: ""
+  
+  # Custom Templates and Scripts
+  templates:
+    linux_servers: true
+    kubernetes_clusters: true
+    docker_containers: true
+    network_devices: true
+    applications: true
+
+# === DEPLOYMENT OPTIONS ===
+deployment:
+  strategy: "RollingUpdate"
+  max_surge: 1
+  max_unavailable: 0
+  
+  # Node Selection
+  node_selector:
+    kubernetes.io/os: linux
+  
+  # Tolerations for dedicated monitoring nodes
+  tolerations:
+    - key: "monitoring"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  
+  # Anti-affinity for high availability
+  pod_anti_affinity: true

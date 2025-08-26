@@ -1,0 +1,118 @@
+---
+# Zabbix Server 7.0 LTS Deployment
+
+- name: "🖥️  Deploy Zabbix Server 7.0 LTS"
+  shell: |
+    cat << 'EOF' | {{ kubectl_path | default('/usr/local/bin/kubectl') }} apply -f -
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: zabbix-server
+      namespace: {{ network.namespace }}
+      labels:
+        app: zabbix-server
+        component: server
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: zabbix-server
+      template:
+        metadata:
+          labels:
+            app: zabbix-server
+            component: server
+        spec:
+          containers:
+          - name: zabbix-server
+            image: zabbix/zabbix-server-pgsql:7.0-alpine-latest
+            ports:
+            - containerPort: 10051
+              name: zabbix-server
+            env:
+            # Database Configuration
+            - name: DB_SERVER_HOST
+              value: "postgresql-service"
+            - name: DB_SERVER_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-password
+            # Zabbix Server Configuration
+            - name: ZBX_CACHESIZE
+              value: "256M"
+            - name: ZBX_CACHEUPDATEFREQUENCY
+              value: "60"
+            - name: ZBX_STARTDBSYNCERS
+              value: "4"
+            - name: ZBX_HISTORYCACHESIZE
+              value: "128M"
+            - name: ZBX_HISTORYINDEXCACHESIZE
+              value: "128M"
+            - name: ZBX_TRENDCACHESIZE
+              value: "128M"
+            - name: ZBX_VALUECACHESIZE
+              value: "256M"
+            - name: ZBX_TIMEOUT
+              value: "30"
+            - name: ZBX_LOGSLOWQUERIES
+              value: "3000"
+            # Database Schema Initialization (Critical Fix)
+            - name: ZBX_DBTIMEZONE
+              value: "America/Sao_Paulo"
+            resources:
+              requests:
+                memory: "1Gi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+          nodeSelector:
+            kubernetes.io/os: linux
+    ---
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: zabbix-server-service
+      namespace: {{ network.namespace }}
+      labels:
+        app: zabbix-server
+    spec:
+      type: ClusterIP
+      ports:
+      - port: 10051
+        targetPort: 10051
+        protocol: TCP
+        name: zabbix-server
+      selector:
+        app: zabbix-server
+    EOF
+  register: zabbix_server_result
+
+- name: "⏳ Wait for Zabbix Server to be ready"
+  shell: |
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} wait --for=condition=available \
+      deployment/zabbix-server -n {{ network.namespace }} --timeout=300s
+  register: server_wait
+  retries: 5
+  delay: 30
+  until: server_wait.rc == 0
+
+- name: "✅ Zabbix Server deployment completed"
+  set_fact:
+    server_completion:
+      - "Zabbix Server: Deployed ✅"
+      - "Service: Available on port 10051 ✅"
+      - "Corporate Edition: 7.0 LTS ✅"

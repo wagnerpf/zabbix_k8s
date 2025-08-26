@@ -1,0 +1,135 @@
+---
+# Zabbix 7.0 LTS Complete Cleanup Playbook
+# Remove all Zabbix resources from Kubernetes cluster
+
+- name: "🗑️  Complete Zabbix 7.0 LTS Cleanup"
+  hosts: k8s-master
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    kubectl_path: '/usr/bin/kubectl'
+    
+  tasks:
+    - name: "⚠️  Starting complete Zabbix cleanup"
+      set_fact:
+        cleanup_info:
+          - "🗑️  Removing all Zabbix 7.0 LTS resources"
+          - "📊 Target: {{ ansible_host }}"
+          - "🌐 Namespace: {{ network.namespace }}"
+          - "⚠️  This will delete ALL data!"
+
+    - name: "🛑 Remove all deployments"
+      shell: |
+        {{ kubectl_path }} delete deployment --all -n {{ network.namespace }} --ignore-not-found=true
+      register: cleanup_deployments
+      ignore_errors: yes
+
+    - name: "🔌 Remove all services"
+      shell: |
+        {{ kubectl_path }} delete service --all -n {{ network.namespace }} --ignore-not-found=true
+      register: cleanup_services
+      ignore_errors: yes
+
+    - name: "💾 Remove all persistent volume claims and volumes"
+      shell: |
+        {{ kubectl_path }} delete pvc --all -n {{ network.namespace }} --ignore-not-found=true
+      register: cleanup_pvcs
+      ignore_errors: yes
+
+    - name: "⏳ Wait for PVCs to be fully deleted"
+      shell: |
+        timeout=60
+        while [ $timeout -gt 0 ]; do
+          pvc_count=$({{ kubectl_path }} get pvc -n {{ network.namespace }} --no-headers 2>/dev/null | wc -l || echo "0")
+          if [ "$pvc_count" -eq 0 ]; then
+            echo "All PVCs removed successfully"
+            break
+          fi
+          echo "Waiting for $pvc_count PVCs to be deleted..."
+          sleep 5
+          timeout=$((timeout-5))
+        done
+      register: pvc_cleanup_wait
+      ignore_errors: yes
+
+    - name: "🗄️  Force remove orphaned Persistent Volumes"
+      shell: |
+        # Get PVs that might be related to our namespace
+        {{ kubectl_path }} get pv --no-headers 2>/dev/null | grep -E 'longhorn.*zabbix|pvc.*{{ network.namespace }}' | awk '{print $1}' | while read pv; do
+          if [ ! -z "$pv" ]; then
+            echo "Removing orphaned PV: $pv"
+            {{ kubectl_path }} patch pv "$pv" -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+            {{ kubectl_path }} delete pv "$pv" --ignore-not-found=true 2>/dev/null || true
+          fi
+        done
+      register: cleanup_orphaned_pvs
+      ignore_errors: yes
+
+    - name: "🔧 Clean up Longhorn volumes (if applicable)"
+      shell: |
+        # Remove any Longhorn volumes that might be stuck
+        if {{ kubectl_path }} get crd volumes.longhorn.io >/dev/null 2>&1; then
+          {{ kubectl_path }} get volumes.longhorn.io -n longhorn-system --no-headers 2>/dev/null | grep -E 'pvc.*{{ network.namespace }}' | awk '{print $1}' | while read volume; do
+            if [ ! -z "$volume" ]; then
+              echo "Removing Longhorn volume: $volume"
+              {{ kubectl_path }} patch volume.longhorn.io "$volume" -n longhorn-system -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+              {{ kubectl_path }} delete volume.longhorn.io "$volume" -n longhorn-system --ignore-not-found=true 2>/dev/null || true
+            fi
+          done
+        fi
+      register: cleanup_longhorn_volumes
+      ignore_errors: yes
+
+    - name: "🔐 Remove all secrets"
+      shell: |
+        {{ kubectl_path }} delete secret --all -n {{ network.namespace }} --ignore-not-found=true
+      register: cleanup_secrets
+      ignore_errors: yes
+
+    - name: "📋 Remove all configmaps"
+      shell: |
+        {{ kubectl_path }} delete configmap --all -n {{ network.namespace }} --ignore-not-found=true
+      register: cleanup_configmaps
+      ignore_errors: yes
+
+    - name: "⏳ Wait for resources to terminate"
+      pause:
+        seconds: 15
+
+    - name: "🗑️  Remove namespace"
+      shell: |
+        {{ kubectl_path }} delete namespace {{ network.namespace }} --ignore-not-found=true
+      register: cleanup_namespace
+      ignore_errors: yes
+
+    - name: "⏳ Wait for namespace deletion"
+      shell: |
+        timeout=60
+        while [ $timeout -gt 0 ]; do
+          if ! {{ kubectl_path }} get namespace {{ network.namespace }} > /dev/null 2>&1; then
+            break
+          fi
+          sleep 2
+          timeout=$((timeout-2))
+        done
+      register: namespace_wait
+      ignore_errors: yes
+
+    - name: "🔍 Verify cleanup completion"
+      shell: |
+        {{ kubectl_path }} get all -n {{ network.namespace }} 2>/dev/null || echo "Namespace not found - cleanup successful"
+      register: cleanup_verification
+      ignore_errors: yes
+
+    - name: "✅ Cleanup completed successfully"
+      set_fact:
+        success_info:
+          - "🎉 Zabbix 7.0 LTS cleanup completed!"
+          - "🗑️  Deployments: Removed"
+          - "🔌 Services: Removed"
+          - "💾 PVCs: Removed"
+          - "🔐 Secrets: Removed"
+          - "📋 ConfigMaps: Removed"
+          - "🌐 Namespace: Removed"
+          - ""
+          - "✅ Cluster is clean and ready for fresh deployment!"

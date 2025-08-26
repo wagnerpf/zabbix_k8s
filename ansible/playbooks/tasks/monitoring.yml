@@ -1,0 +1,100 @@
+---
+# Monitoring and Observability Setup
+# For Zabbix 7.0 LTS Corporate Monitoring
+
+- name: "📊 Setup monitoring and observability"
+  set_fact:
+    monitoring_setup:
+      - "Setting up monitoring components..."
+      - "Prometheus integration: {{ monitoring.prometheus.enabled }}"
+      - "Alerting: Email={{ monitoring.alerting.email_enabled }}, Slack={{ monitoring.alerting.slack_enabled }}"
+
+- name: "🔍 Create monitoring ConfigMap"
+  shell: |
+    cat << 'EOF' | {{ kubectl_path }} apply -f -
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: zabbix-monitoring-config
+      namespace: {{ network.namespace }}
+      labels:
+        app: zabbix-monitoring
+        component: observability
+    data:
+      prometheus.yml: |
+        global:
+          scrape_interval: {{ monitoring.prometheus.scrape_interval }}
+        scrape_configs:
+        - job_name: 'zabbix-server'
+          static_configs:
+          - targets: ['zabbix-server-service:10051']
+        - job_name: 'zabbix-web'
+          static_configs:
+          - targets: ['zabbix-web-service:8080']
+        - job_name: 'postgresql'
+          static_configs:
+          - targets: ['postgresql-service:5432']
+      
+      alerting.yml: |
+        email:
+          enabled: {{ monitoring.alerting.email_enabled }}
+          smtp_server: ""
+          from: "zabbix@empresa.local"
+        slack:
+          enabled: {{ monitoring.alerting.slack_enabled }}
+          webhook_url: ""
+        webhook:
+          enabled: {{ monitoring.alerting.webhook_enabled }}
+          url: ""
+    EOF
+  register: monitoring_config
+  changed_when: "'created' in monitoring_config.stdout or 'configured' in monitoring_config.stdout"
+
+- name: "📊 Apply network policies (if enabled)"
+  shell: |
+    cat << 'EOF' | {{ kubectl_path }} apply -f -
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: zabbix-network-policy
+      namespace: {{ network.namespace }}
+    spec:
+      podSelector:
+        matchLabels:
+          app: zabbix-server
+      policyTypes:
+      - Ingress
+      - Egress
+      ingress:
+      - from:
+        - podSelector:
+            matchLabels:
+              app: zabbix-web
+        ports:
+        - protocol: TCP
+          port: 10051
+      egress:
+      - to:
+        - podSelector:
+            matchLabels:
+              app: postgresql
+        ports:
+        - protocol: TCP
+          port: 5432
+      - to: []
+        ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+    EOF
+  when: security.network_policies | default(false)
+  register: network_policies
+  changed_when: "'created' in network_policies.stdout or 'configured' in network_policies.stdout"
+
+- name: "✅ Monitoring setup completed"
+  set_fact:
+    monitoring_completion:
+      - "Monitoring ConfigMap: Created ✅"
+      - "Network Policies: {{ 'Applied' if security.network_policies | default(false) else 'Disabled' }}"
+      - "Prometheus metrics: Available on /metrics endpoints"

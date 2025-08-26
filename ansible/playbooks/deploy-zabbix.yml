@@ -1,0 +1,60 @@
+---
+# Zabbix 7.0 LTS Corporate Deployment Playbook
+# Target: Kubernetes cluster with Longhorn storage
+
+- name: "🚀 Deploy Zabbix 7.0 LTS to Kubernetes"
+  hosts: k8s-master
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    kubectl_path: '/usr/bin/kubectl'
+    
+  tasks:
+    - name: "🎯 Starting Zabbix 7.0 LTS deployment"
+      set_fact:
+        deployment_info:
+          - "🚀 Zabbix 7.0 LTS Corporate Edition"
+          - "📊 Target: {{ ansible_host }}"
+          - "🔧 Storage: {{ storage.class }}"
+          - "🌐 Namespace: {{ network.namespace }}"
+          - "💾 PostgreSQL: {{ database.version }}"
+
+    # Infrastructure Setup
+    - name: "🏗️  Setup infrastructure"
+      include_tasks: tasks/infrastructure.yml
+
+    # Database Deployment  
+    - name: "🗄️  Deploy PostgreSQL database"
+      include_tasks: tasks/database.yml
+
+    # Database Schema Initialization
+    - name: "🔧 Initialize database schema"
+      include_tasks: tasks/database-init.yml
+
+    # Zabbix Server
+    - name: "⚡ Deploy Zabbix Server"
+      include_tasks: tasks/zabbix-server.yml
+
+    # Zabbix Web Interface
+    - name: "🌐 Deploy Zabbix Web Interface"
+      include_tasks: tasks/zabbix-web.yml
+
+    # Monitoring & Observability
+    - name: "📊 Setup monitoring"
+      include_tasks: tasks/monitoring.yml
+
+    # Final Verification
+    - name: "✅ Verify deployment"
+      include_tasks: tasks/verification.yml
+
+    - name: "🎉 Deployment completed successfully"
+      set_fact:
+        completion_info:
+          - "✅ Zabbix 7.0 LTS deployed successfully!"
+          - "🌐 Web Interface: http://{{ ansible_host }}:30080"
+          - "🔐 HTTPS: https://{{ ansible_host }}:30443"
+          - "👤 Default Login: Admin / zabbix"
+          - "📊 Database: PostgreSQL {{ database.version }}"
+          - "💾 Storage: {{ storage.postgres.size }}"
+          - ""
+          - "🚀 Ready for corporate monitoring!"

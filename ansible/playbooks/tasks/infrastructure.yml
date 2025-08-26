@@ -1,0 +1,123 @@
+---
+# Infrastructure Setup Tasks
+# Creates namespace, storage classes, and basic infrastructure
+
+- name: "🏗️  Create Zabbix namespace"
+  shell: |
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} create namespace {{ network.namespace }} --dry-run=client -o yaml | \
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} apply -f -
+  register: namespace_result
+  changed_when: "'created' in namespace_result.stdout"
+
+- name: "🏷️  Label namespace for monitoring"
+  shell: |
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} label namespace {{ network.namespace }} \
+      name={{ network.namespace }} \
+      purpose=corporate-monitoring \
+      version={{ zabbix.version }} \
+      --overwrite
+  changed_when: true
+
+- name: "💾 Create storage classes (if needed)"
+  shell: |
+    cat << 'EOF' | {{ kubectl_path | default('/usr/local/bin/kubectl') }} apply -f -
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: {{ storage.class }}-zabbix
+      labels:
+        app: zabbix
+        component: storage
+    provisioner: driver.longhorn.io
+    allowVolumeExpansion: true
+    reclaimPolicy: Retain
+    volumeBindingMode: Immediate
+    parameters:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "20"
+      fromBackup: ""
+      fsType: "ext4"
+    ---
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: {{ storage.class }}-zabbix-db
+      labels:
+        app: zabbix
+        component: database-storage
+    provisioner: driver.longhorn.io
+    allowVolumeExpansion: true
+    reclaimPolicy: Retain
+    volumeBindingMode: Immediate
+    parameters:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "20"
+      fromBackup: ""
+      fsType: "ext4"
+    EOF
+  register: storage_result
+  changed_when: "'created' in storage_result.stdout or 'configured' in storage_result.stdout"
+
+- name: "🔐 Create database secrets"
+  shell: |
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} create secret generic zabbix-db-secret \
+      --from-literal=postgres-user="{{ database.user }}" \
+      --from-literal=postgres-password="{{ database.password }}" \
+      --from-literal=postgres-root-password="{{ database.root_password }}" \
+      --from-literal=postgres-database="{{ database.name }}" \
+      -n {{ network.namespace }} \
+      --dry-run=client -o yaml | {{ kubectl_path | default('/usr/local/bin/kubectl') }} apply -f -
+  register: secret_result
+  changed_when: "'created' in secret_result.stdout or 'configured' in secret_result.stdout"
+
+- name: "📋 Create Zabbix configuration ConfigMap"
+  shell: |
+    cat << 'EOF' | {{ kubectl_path | default('/usr/local/bin/kubectl') }} apply -f -
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: zabbix-config
+      namespace: {{ network.namespace }}
+      labels:
+        app: zabbix
+        component: config
+    data:
+      # Database Configuration
+      postgres-database: "{{ database.name }}"
+      
+      # Zabbix Server Configuration
+      ZBX_SERVER_HOST: "zabbix-server-service"
+      ZBX_SERVER_PORT: "{{ network.server.port }}"
+      ZBX_SERVER_NAME: "{{ zabbix_server.config.server_name }}"
+      
+      # PHP Configuration
+      PHP_TZ: "{{ zabbix_web.php.timezone }}"
+      
+      # Performance Settings
+      ZBX_LISTENPORT: "{{ network.server.port }}"
+      ZBX_DEBUGLEVEL: "{{ zabbix_server.config.debug_level }}"
+      ZBX_CACHESIZE: "{{ zabbix_server.performance.cache_size }}"
+      ZBX_HISTORYCACHESIZE: "{{ zabbix_server.performance.history_cache_size }}"
+      ZBX_HISTORYINDEXCACHESIZE: "{{ zabbix_server.performance.history_index_cache_size }}"
+      ZBX_TRENDCACHESIZE: "{{ zabbix_server.performance.trend_cache_size }}"
+      ZBX_VALUECACHESIZE: "{{ zabbix_server.performance.value_cache_size }}"
+      ZBX_STARTPOLLERS: "{{ zabbix_server.performance.start_pollers }}"
+      ZBX_STARTTRAPPERS: "{{ zabbix_server.performance.start_trappers }}"
+      ZBX_STARTPINGERS: "{{ zabbix_server.performance.start_pingers }}"
+      ZBX_STARTDISCOVERERS: "{{ zabbix_server.performance.start_discoverers }}"
+      ZBX_STARTHTTPPOLLERS: "{{ zabbix_server.performance.start_http_pollers }}"
+      ZBX_STARTDBSYNCERS: "{{ zabbix_server.performance.start_db_syncers }}"
+      ZBX_HOUSEKEEPINGFREQUENCY: "{{ zabbix_server.performance.housekeeping_frequency }}"
+      ZBX_MAXHOUSEKEEPERDELETE: "{{ zabbix_server.performance.max_housekeeper_delete }}"
+      ZBX_TIMEOUT: "{{ zabbix_server.performance.timeout }}"
+    EOF
+  register: configmap_result
+  changed_when: "'created' in configmap_result.stdout or 'configured' in configmap_result.stdout"
+
+- name: "✅ Infrastructure setup completed"
+  set_fact:
+    infrastructure_status:
+      - "Namespace: {{ network.namespace }} ✅"
+      - "Storage Classes: Created ✅"
+      - "Secrets: Configured ✅"
+      - "ConfigMaps: Applied ✅"

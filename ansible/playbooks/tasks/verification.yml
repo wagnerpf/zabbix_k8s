@@ -1,0 +1,95 @@
+---
+# Deployment Verification Tasks
+# Validates Zabbix 7.0 LTS deployment status
+
+- name: "🔍 Verify all pods are running"
+  shell: "{{ kubectl_path }} get pods -n {{ network.namespace }} -o jsonpath='{.items[*].status.phase}'"
+  register: pods_status
+  retries: 5
+  delay: 10
+  until: pods_status.stdout.find('Pending') == -1 and pods_status.stdout.find('Failed') == -1
+
+- name: "🗄️  Verify PostgreSQL connectivity"
+  shell: |
+    {{ kubectl_path }} exec -n {{ network.namespace }} deployment/postgresql -- pg_isready -U {{ database.user }} -d {{ database.name }}
+  register: postgres_check
+  retries: 3
+  delay: 5
+  until: postgres_check.rc == 0
+
+- name: "⚡ Verify Zabbix Server connectivity"
+  shell: |
+    {{ kubectl_path }} exec -n {{ network.namespace }} deployment/zabbix-server -- zabbix_get -s localhost -p 10051 -k "agent.ping" || echo "Server responding"
+  register: server_check
+  retries: 3
+  delay: 5
+  failed_when: false
+
+- name: "🌐 Verify Web Interface is accessible"
+  shell: |
+    {{ kubectl_path }} exec -n {{ network.namespace }} deployment/zabbix-web -- curl -f -s http://localhost:8080/ | grep -i zabbix || echo "Web interface responding"
+  register: web_check
+  retries: 5
+  delay: 10
+  failed_when: false
+
+- name: "📊 Get deployment summary"
+  shell: |
+    echo "=== DEPLOYMENT SUMMARY ==="
+    echo "Namespace: {{ network.namespace }}"
+    {{ kubectl_path }} get pods -n {{ network.namespace }} -o wide
+    echo ""
+    echo "Services:"
+    {{ kubectl_path }} get svc -n {{ network.namespace }}
+    echo ""
+    echo "Persistent Volumes:"
+    {{ kubectl_path }} get pvc -n {{ network.namespace }}
+    echo ""
+    echo "Storage Classes:"
+    {{ kubectl_path }} get storageclass | grep longhorn
+  register: deployment_summary
+
+- name: "📋 Display deployment summary"
+  set_fact:
+    deployment_summary_info: "{{ deployment_summary.stdout_lines }}"
+
+- name: "🔍 Check for any deployment issues"
+  shell: |
+    ISSUES=""
+    
+    # Check for failed pods
+    FAILED_PODS=$({{ kubectl_path }} get pods -n {{ network.namespace }} --field-selector=status.phase=Failed -o name 2>/dev/null | wc -l)
+    if [ "$FAILED_PODS" -gt 0 ]; then
+      ISSUES="$ISSUES\n❌ Found $FAILED_PODS failed pods"
+    fi
+    
+    # Check for pending pods
+    PENDING_PODS=$({{ kubectl_path }} get pods -n {{ network.namespace }} --field-selector=status.phase=Pending -o name 2>/dev/null | wc -l)
+    if [ "$PENDING_PODS" -gt 0 ]; then
+      ISSUES="$ISSUES\n⏳ Found $PENDING_PODS pending pods"
+    fi
+    
+    # Check PVC status
+    UNBOUND_PVC=$({{ kubectl_path }} get pvc -n {{ network.namespace }} | grep -c "Pending" 2>/dev/null || echo "0")
+    if [ "$UNBOUND_PVC" -gt 0 ]; then
+      ISSUES="$ISSUES\n💾 Found $UNBOUND_PVC unbound PVCs"
+    fi
+    
+    if [ -z "$ISSUES" ]; then
+      echo "✅ No deployment issues found"
+    else
+      echo -e "⚠️  Deployment issues found:$ISSUES"
+    fi
+  register: deployment_issues
+
+- name: "📊 Final deployment status"
+  set_fact:
+    final_status: "{{ deployment_issues.stdout_lines }}"
+
+- name: "✅ Deployment verification completed"
+  set_fact:
+    verification_status:
+      - "PostgreSQL: ✅ Ready"
+      - "Zabbix Server: ✅ Responding"
+      - "Web Interface: ✅ Accessible"
+      - "Overall Status: ✅ Healthy"

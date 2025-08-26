@@ -1,0 +1,161 @@
+---
+# Database Schema Initialization Job
+# This job initializes the Zabbix database schema before the server starts
+
+- name: "🗄️  Initialize Zabbix Database Schema"
+  shell: |
+    cat << 'EOF' | {{ kubectl_path | default('/usr/local/bin/kubectl') }} apply -f -
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: zabbix-db-init
+      namespace: {{ network.namespace }}
+      labels:
+        app: zabbix-db-init
+        component: database-init
+    spec:
+      backoffLimit: 3
+      template:
+        metadata:
+          labels:
+            app: zabbix-db-init
+            component: database-init
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: zabbix-db-init
+            image: zabbix/zabbix-server-pgsql:7.0-alpine-latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "🔧 Starting Zabbix Database Schema Initialization..."
+              
+              # Wait for PostgreSQL to be ready
+              echo "⏳ Waiting for PostgreSQL to be ready..."
+              until pg_isready -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER; do
+                echo "PostgreSQL is unavailable - sleeping"
+                sleep 2
+              done
+              echo "✅ PostgreSQL is ready!"
+              
+              # Check if database is already initialized
+              echo "🔍 Checking if database is already initialized..."
+              if psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='dbversion';" | grep -q "1"; then
+                echo "✅ Database already initialized, skipping..."
+                exit 0
+              fi
+              
+              echo "🚀 Initializing Zabbix database schema..."
+              
+              # Initialize the database schema
+              cd /usr/share/doc/zabbix-server-pgsql*/
+              
+              # Create schema
+              echo "📋 Creating database schema..."
+              if [ -f create.sql.gz ]; then
+                gunzip -c create.sql.gz | psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB
+              elif [ -f create.sql ]; then
+                psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB -f create.sql
+              else
+                echo "❌ Schema file not found!"
+                exit 1
+              fi
+              
+              # Insert initial data
+              echo "📋 Inserting initial data..."
+              if [ -f images.sql.gz ]; then
+                gunzip -c images.sql.gz | psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB
+              elif [ -f images.sql ]; then
+                psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB -f images.sql
+              fi
+              
+              if [ -f data.sql.gz ]; then
+                gunzip -c data.sql.gz | psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB
+              elif [ -f data.sql ]; then
+                psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB -f data.sql
+              fi
+              
+              echo "🎉 Zabbix database initialization completed successfully!"
+              
+              # Verify initialization
+              echo "✅ Verifying database initialization..."
+              DB_VERSION=$(psql -h $DB_SERVER_HOST -p $DB_SERVER_PORT -U $POSTGRES_USER -d $POSTGRES_DB -t -c "SELECT mandatory FROM dbversion ORDER BY dbversionid DESC LIMIT 1;" | tr -d ' ')
+              echo "Database version: $DB_VERSION"
+              
+              if [ ! -z "$DB_VERSION" ]; then
+                echo "✅ Database successfully initialized with version $DB_VERSION"
+              else
+                echo "❌ Database initialization verification failed"
+                exit 1
+              fi
+            env:
+            # Database Configuration
+            - name: DB_SERVER_HOST
+              value: "postgresql-service"
+            - name: DB_SERVER_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-password
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-db-secret
+                  key: postgres-password
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"
+          nodeSelector:
+            kubernetes.io/os: linux
+    EOF
+  register: db_init_result
+  changed_when: "'created' in db_init_result.stdout or 'configured' in db_init_result.stdout"
+
+- name: "⏳ Wait for database initialization to complete"
+  shell: |
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} wait --for=condition=complete \
+      job/zabbix-db-init -n {{ network.namespace }} --timeout=600s
+  register: db_init_wait
+  retries: 3
+  delay: 30
+  until: db_init_wait.rc == 0
+
+- name: "🔍 Verify database initialization job status"
+  shell: |
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} get job zabbix-db-init \
+      -n {{ network.namespace }} -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}'
+  register: db_init_status
+  until: "'True' in db_init_status.stdout"
+  retries: 10
+  delay: 10
+
+- name: "✅ Database initialization completed"
+  set_fact:
+    db_init_completion:
+      - "Schema: Loaded ✅"
+      - "Initial Data: Imported ✅"
+      - "Ready for Zabbix Server connection ✅"
+
+- name: "🧹 Clean up database initialization job"
+  shell: |
+    {{ kubectl_path | default('/usr/local/bin/kubectl') }} delete job zabbix-db-init \
+      -n {{ network.namespace }} --ignore-not-found=true
+  ignore_errors: true
