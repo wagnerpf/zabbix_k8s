@@ -11,7 +11,6 @@ Este projeto implementa uma solução **enterprise-grade** de monitoramento usan
 - **⚙️ Automação Ansible** - Deploy e configuração automatizados  
 - **☸️ Kubernetes Native** - Containerizado e escalável
 - **🗄️ PostgreSQL 15** - Database otimizado para performance
-- **📊 Prometheus Ready** - Anotações preparadas para integração futura
 - **🔒 Enterprise Security** - Configurações corporativas seguras
 
 ## 📁 Estrutura do Projeto
