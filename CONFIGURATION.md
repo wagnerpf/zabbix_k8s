@@ -57,6 +57,15 @@ ssh -i ~/.ssh/k8s-cluster-key <SEU_USUARIO>@<SEU_IP_K8S>
 - ✅ Informações sensíveis são placeholders
 - ✅ SSH keys referenciadas genericamente
 
+## 📊 Observação sobre Prometheus
+
+**Este projeto NÃO inclui deploy do Prometheus/Grafana**, apenas:
+- Anotações preparatórias nos pods Zabbix
+- ConfigMap com configuração prometheus.yml (não utilizada)
+- Variáveis de configuração no inventário
+
+Para implementar Prometheus, será necessário adicionar os manifests correspondentes.
+
 ## 📞 Suporte
 
 Para dúvidas sobre a configuração específica do seu ambiente, consulte:

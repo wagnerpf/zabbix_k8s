@@ -11,7 +11,7 @@ Este projeto implementa uma solução **enterprise-grade** de monitoramento usan
 - **⚙️ Automação Ansible** - Deploy e configuração automatizados  
 - **☸️ Kubernetes Native** - Containerizado e escalável
 - **🗄️ PostgreSQL 15** - Database otimizado para performance
-- **📊 Prometheus Integration** - Métricas e observabilidade moderna
+- **📊 Prometheus Ready** - Anotações preparadas para integração futura
 - **🔒 Enterprise Security** - Configurações corporativas seguras
 
 ## 📁 Estrutura do Projeto
@@ -83,7 +83,7 @@ zabbix_server:
 - **Zabbix Server 7.0 LTS** - Engine de monitoramento (C/C++)
 - **PostgreSQL 15** - Database otimizado (20GB)
 - **Zabbix Web** - Interface PHP responsiva (2 replicas)
-- **Prometheus Integration** - Métricas modernas
+- **Prometheus Ready** - Anotações preparadas para integração
 - **Longhorn Storage** - Persistência de dados
 
 **📋 Nota**: Java Gateway removido (não necessário para monitoramento básico)
@@ -260,6 +260,7 @@ ansible-playbook playbooks/configure-templates.yml
 - **LDAP/Active Directory** - Autenticação corporativa
 - **SAML SSO** - Single Sign-On (novo no 7.0)
 - **Slack/Teams** - Integração de alertas
+- **Prometheus** - Deploy do stack de métricas (planejado)
 - **Grafana** - Dashboards executivos
 
 ## 📚 Recursos e Documentação
@@ -286,10 +287,21 @@ ansible-playbook playbooks/configure-templates.yml
 
 ### 💡 Melhorias Futuras
 - [ ] Helm Chart para deploy alternativo
+- [ ] **Prometheus Stack** - Deploy completo do Prometheus/Grafana
 - [ ] Multi-tenant configuration
 - [ ] Auto-scaling baseado em métricas
 - [ ] Integração com service mesh (Istio)
 - [ ] Templates para cloud providers (AWS/Azure/GCP)
+
+### 📊 **Status do Prometheus**
+**Atualmente**: O projeto inclui apenas **preparação** para Prometheus:
+- ✅ Anotações `prometheus.io/scrape` nos pods
+- ✅ ConfigMap com configuração prometheus.yml
+- ✅ Variáveis de configuração no inventário
+- ❌ **Prometheus server não é deployado**
+- ❌ **Grafana não é deployado**
+
+**Para implementar**: Será necessário adicionar manifests para Prometheus/Grafana ou usar Helm charts.
 
 ## 📄 Licença e Disclaimer
 
